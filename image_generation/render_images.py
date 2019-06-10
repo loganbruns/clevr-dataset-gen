@@ -7,6 +7,7 @@
 
 from __future__ import print_function
 import math, sys, random, argparse, json, os, tempfile
+import numpy as np
 from datetime import datetime as dt
 from collections import Counter
 
@@ -30,6 +31,7 @@ except ImportError as e:
   INSIDE_BLENDER = False
 if INSIDE_BLENDER:
   try:
+    sys.path.append('/home/logan/projs/clevr-dataset-gen/image_generation')
     import utils
   except ImportError as e:
     print("\nERROR")
@@ -271,6 +273,8 @@ def render_scene(args,
   if args.camera_jitter > 0:
     for i in range(3):
       bpy.data.objects['Camera'].location[i] += rand(args.camera_jitter)
+  scene_struct['camera_location'] = [bpy.data.objects['Camera'].location.x, bpy.data.objects['Camera'].location.y, bpy.data.objects['Camera'].location.z]
+  scene_struct['camera_rotation'] = [bpy.data.objects['Camera'].rotation_euler.x, bpy.data.objects['Camera'].rotation_euler.y, bpy.data.objects['Camera'].rotation_euler.z]
 
   # Figure out the left, up, and behind directions along the plane and record
   # them in the scene structure
@@ -325,6 +329,42 @@ def render_scene(args,
   if output_blendfile is not None:
     bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
 
+  is_gqn_training = True
+  if is_gqn_training:
+    output_image = output_image.replace('.png', '_{}.png')
+    output_scene = output_scene.replace('.json', '_{}.json')
+
+    sequence_length = 10
+    r = np.linalg.norm([bpy.data.objects['Camera'].location.x, bpy.data.objects['Camera'].location.y])
+    delta_radians = 2 * np.pi / sequence_length
+
+    theta = 0.
+    for angle in range(sequence_length):
+      scene_struct = {
+        'split': output_split,
+        'angle': angle,
+        'image_index': output_index,
+        'image_filename': os.path.basename(output_image.format(angle)),
+        'camera_location': [bpy.data.objects['Camera'].location.x, bpy.data.objects['Camera'].location.y, bpy.data.objects['Camera'].location.z],
+        'camera_rotation': [bpy.data.objects['Camera'].rotation_euler.x, bpy.data.objects['Camera'].rotation_euler.y, bpy.data.objects['Camera'].rotation_euler.z],
+      }
+
+      render_args.filepath = output_image.format(angle)
+      bpy.data.objects['Camera'].location.x = r * np.cos(theta)
+      bpy.data.objects['Camera'].location.y = r * np.sin(theta)
+      
+      while True:
+        try:
+          bpy.ops.render.render(write_still=True)
+          break
+        except Exception as e:
+          print(e)
+          
+      with open(output_scene.format(angle), 'w') as f:
+        json.dump(scene_struct, f, indent=2)
+      
+      theta += delta_radians
+      bpy.data.objects['Camera'].rotation_euler.z += delta_radians
 
 def add_random_objects(scene_struct, num_objects, args, camera):
   """
